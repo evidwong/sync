@@ -1,21 +1,25 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"baisiyi.net/models"
 
-	"baisiyi.net/cache"
+	"github.com/silenceper/wechat/cache"
 
 	"baisiyi.net/config"
 
+	"github.com/gomodule/redigo/redis"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/silenceper/wechat/context"
+	"github.com/silenceper/wechat/template"
 )
 
 var (
@@ -59,7 +63,7 @@ type Config struct {
 	PayMchID       string //支付 - 商户 ID
 	PayNotifyURL   string //支付 - 接受微信支付结果通知的接口地址
 	PayKey         string //支付 - 商户后台设置的支付 key
-	Cache          cache.Redis
+	Cache          cache.Cache
 }
 
 // Wechat 微信
@@ -106,24 +110,40 @@ func run(mydb *Mydb) {
 
 func sendWechatTemplateMessage(mydb *Mydb) {
 	defer mydb.db.Close()
-	var cid = 0
+	var cid int
 	for {
 		var jobs []models.RemindJob
 		mydb.db.Where("type='wechat' AND action_at='0000-00-00 00:00:00' AND status=0").Find(&jobs)
 		if len(jobs) <= 0 {
 			time.Sleep(time.Second * 10)
 		} else {
+
 			for _, row := range jobs {
+				cid = row.Cid
+				var msg template.Message
+				err := json.Unmarshal([]byte(row.Job), &msg)
+				if err != nil {
+					continue
+				}
+				r := pool.Conn.Get()
+				_, err = r.Do("Select", 1)
+				if err != nil {
+					continue
+				}
+				wechatConfig, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+strconv.Itoa(cid)))
+				if err != nil {
+					continue
+				}
 				wechat := NewWechat(&Config{
-					AppID:     "wxb8b1c53731dcb67f",
-					AppSecret: "461a3886c314edac6c8acd430c35378c",
-					Token:     "test",
+					AppID:     wechatConfig["appid"],
+					AppSecret: wechatConfig["appsecret"],
+					Token:     wechatConfig["token"],
 					Cache:     pool,
 				})
-				accessToken, err := wechat.Context.GetAccessToken()
+				tplMsg := template.NewTemplate(wechat.Context)
+				_, err = tplMsg.Send(&msg)
 				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
+					fmt.Println("发送模板消息失败")
 				}
 			}
 			time.Sleep(time.Second * 5)
@@ -141,7 +161,12 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	pool = cache.NewRedis(cfg)
+	pool = cache.NewRedis(&cache.RedisOpts{
+		Host:     cfg.Redis.Host,
+		Password: cfg.Redis.Auth,
+		Port:     cfg.Redis.Port,
+		Database: cfg.Redis.DB,
+	})
 	mydb = NewMydb(cfg)
 	fmt.Printf("%T", mydb)
 
