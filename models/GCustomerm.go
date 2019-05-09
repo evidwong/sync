@@ -1,0 +1,142 @@
+package models
+
+import (
+	"database/sql"
+	"time"
+)
+
+type GCustomerm struct {
+	AccType            sql.NullString  `gorm:"column:AccType" json:"AccType"`
+	Address            sql.NullString  `gorm:"column:Address" json:"Address"`
+	Area               sql.NullString  `gorm:"column:Area" json:"Area"`
+	ArriveDays         sql.NullInt64   `gorm:"column:ArriveDays" json:"ArriveDays"`
+	BUnitName          sql.NullString  `gorm:"column:BUnitName" json:"BUnitName"`
+	BalanceIntegral    int             `gorm:"column:BalanceIntegral" json:"BalanceIntegral"`
+	Bank               sql.NullString  `gorm:"column:Bank" json:"Bank"`
+	BankAccName        sql.NullString  `gorm:"column:BankAccName" json:"BankAccName"`
+	BankAccount        sql.NullString  `gorm:"column:BankAccount" json:"BankAccount"`
+	BillingAddress     sql.NullString  `gorm:"column:BillingAddress" json:"BillingAddress"`
+	BillingTel         sql.NullString  `gorm:"column:BillingTel" json:"BillingTel"`
+	BirthMD            sql.NullString  `gorm:"column:BirthMD" json:"BirthMD"`
+	Birthday           time.Time       `gorm:"column:Birthday" json:"Birthday"`
+	BusinessNo         sql.NullString  `gorm:"column:BusinessNo" json:"BusinessNo"`
+	CCreateDate        time.Time       `gorm:"column:CCreateDate" json:"CCreateDate"`
+	CEffectDate        time.Time       `gorm:"column:CEffectDate" json:"CEffectDate"`
+	CJManageRate       sql.NullFloat64 `gorm:"column:CJManageRate" json:"CJManageRate"`
+	COMNo              sql.NullString  `gorm:"column:COMNo" json:"COMNo"`
+	CPManageRate       sql.NullFloat64 `gorm:"column:CPManageRate" json:"CPManageRate"`
+	CancelReason       string          `gorm:"column:CancelReason" json:"CancelReason"`
+	CarryCode          sql.NullString  `gorm:"column:CarryCode" json:"CarryCode"`
+	CarryName          sql.NullString  `gorm:"column:CarryName" json:"CarryName"`
+	City               sql.NullString  `gorm:"column:City" json:"City"`
+	ContractDate       time.Time       `gorm:"column:ContractDate" json:"ContractDate"`
+	CorpType           sql.NullString  `gorm:"column:CorpType" json:"CorpType"`
+	Corporation        sql.NullString  `gorm:"column:Corporation" json:"Corporation"`
+	CreateFilePerson   sql.NullString  `gorm:"column:CreateFilePerson" json:"CreateFilePerson"`
+	CreditCode         sql.NullString  `gorm:"column:CreditCode" json:"CreditCode"`
+	CreditLevel        sql.NullString  `gorm:"column:CreditLevel" json:"CreditLevel"`
+	CustAttribute1     sql.NullString  `gorm:"column:CustAttribute1" json:"CustAttribute1"`
+	CustAttribute2     sql.NullString  `gorm:"column:CustAttribute2" json:"CustAttribute2"`
+	CustAttribute3     sql.NullString  `gorm:"column:CustAttribute3" json:"CustAttribute3"`
+	CustAttribute4     sql.NullString  `gorm:"column:CustAttribute4" json:"CustAttribute4"`
+	CustAttribute5     sql.NullString  `gorm:"column:CustAttribute5" json:"CustAttribute5"`
+	CustAttribute6     sql.NullString  `gorm:"column:CustAttribute6" json:"CustAttribute6"`
+	CustAttribute7     sql.NullString  `gorm:"column:CustAttribute7" json:"CustAttribute7"`
+	CustAttribute8     sql.NullString  `gorm:"column:CustAttribute8" json:"CustAttribute8"`
+	CustAttribute9     sql.NullString  `gorm:"column:CustAttribute9" json:"CustAttribute9"`
+	CustSameNo         sql.NullInt64   `gorm:"column:CustSameNo" json:"CustSameNo"`
+	CustomerCode       sql.NullString  `gorm:"column:CustomerCode" json:"CustomerCode"`
+	CustomerKind       sql.NullString  `gorm:"column:CustomerKind" json:"CustomerKind"`
+	CustomerName       sql.NullString  `gorm:"column:CustomerName" json:"CustomerName"`
+	CustomerProperty   sql.NullString  `gorm:"column:CustomerProperty" json:"CustomerProperty"`
+	CustomerSource     sql.NullString  `gorm:"column:CustomerSource" json:"CustomerSource"`
+	CustomerType       sql.NullString  `gorm:"column:CustomerType" json:"CustomerType"`
+	DealIn             sql.NullString  `gorm:"column:DealIn" json:"DealIn"`
+	DiscountRate       sql.NullFloat64 `gorm:"column:DiscountRate" json:"DiscountRate"`
+	Duty               sql.NullString  `gorm:"column:Duty" json:"Duty"`
+	Earning            sql.NullString  `gorm:"column:Earning" json:"Earning"`
+	Email              sql.NullString  `gorm:"column:Email" json:"Email"`
+	EnterpriseKind     sql.NullString  `gorm:"column:EnterpriseKind" json:"EnterpriseKind"`
+	Fancy              sql.NullString  `gorm:"column:Fancy" json:"Fancy"`
+	Fax                sql.NullString  `gorm:"column:Fax" json:"Fax"`
+	Finance            sql.NullString  `gorm:"column:Finance" json:"Finance"`
+	FirstSalesDatetime time.Time       `gorm:"column:FirstSalesDatetime" json:"FirstSalesDatetime"`
+	FriendRelation     sql.NullString  `gorm:"column:FriendRelation" json:"FriendRelation"`
+	HandPhone          sql.NullString  `gorm:"column:HandPhone" json:"HandPhone"`
+	HandPhone2         sql.NullString  `gorm:"column:HandPhone2" json:"HandPhone2"`
+	HeadImage          sql.NullString  `gorm:"column:HeadImage" json:"HeadImage"`
+	HTTPAddress        sql.NullString  `gorm:"column:HttpAddress" json:"HttpAddress"`
+	IDCard             sql.NullString  `gorm:"column:IDCard" json:"IDCard"`
+	IncomeInfo         sql.NullFloat64 `gorm:"column:IncomeInfo" json:"IncomeInfo"`
+	InsuranceName      sql.NullString  `gorm:"column:InsuranceName" json:"InsuranceName"`
+	Integral           int             `gorm:"column:Integral" json:"Integral"`
+	Introducer         string          `gorm:"column:Introducer" json:"Introducer"`
+	InvoiceType        sql.NullString  `gorm:"column:InvoiceType" json:"InvoiceType"`
+	IsBlackList        sql.NullInt64   `gorm:"column:IsBlackList" json:"IsBlackList"`
+	IsCOMNo            sql.NullInt64   `gorm:"column:IsCOMNo" json:"IsCOMNo"`
+	IsCancel           int             `gorm:"column:IsCancel" json:"IsCancel"`
+	IsCustomer         sql.NullInt64   `gorm:"column:IsCustomer" json:"IsCustomer"`
+	IsCustomerPrice    sql.NullInt64   `gorm:"column:IsCustomerPrice" json:"IsCustomerPrice"`
+	IsSupplier         sql.NullInt64   `gorm:"column:IsSupplier" json:"IsSupplier"`
+	IsThreePF          sql.NullInt64   `gorm:"column:IsThreePF" json:"IsThreePF"`
+	JobDiscountRate    sql.NullFloat64 `gorm:"column:JobDiscountRate" json:"JobDiscountRate"`
+	JoinMemberDate     time.Time       `gorm:"column:JoinMemberDate" json:"JoinMemberDate"`
+	LastAdviser        sql.NullString  `gorm:"column:LastAdviser" json:"LastAdviser"`
+	LastSalesDatetime  time.Time       `gorm:"column:LastSalesDatetime" json:"LastSalesDatetime"`
+	LimitDate          time.Time       `gorm:"column:LimitDate" json:"LimitDate"`
+	Linkman            sql.NullString  `gorm:"column:Linkman" json:"Linkman"`
+	MSN                sql.NullString  `gorm:"column:MSN" json:"MSN"`
+	MemberAmount       sql.NullFloat64 `gorm:"column:MemberAmount" json:"MemberAmount"`
+	MemberCardNo       string          `gorm:"column:MemberCardNo" json:"MemberCardNo"`
+	MemberExitDate     time.Time       `gorm:"column:MemberExitDate" json:"MemberExitDate"`
+	MemberID           int             `gorm:"column:MemberID" json:"MemberID"`
+	MemberIsCancel     sql.NullInt64   `gorm:"column:MemberIsCancel" json:"MemberIsCancel"`
+	MemberRemarks      string          `gorm:"column:MemberRemarks" json:"MemberRemarks"`
+	MemberType         string          `gorm:"column:MemberType" json:"MemberType"`
+	MemberYears        int             `gorm:"column:MemberYears" json:"MemberYears"`
+	ModifyDate         time.Time       `gorm:"column:ModifyDate" json:"ModifyDate"`
+	ModifyIP           sql.NullString  `gorm:"column:ModifyIP" json:"ModifyIP"`
+	ModifyPersonCode   sql.NullString  `gorm:"column:ModifyPersonCode" json:"ModifyPersonCode"`
+	ModifyPersonName   sql.NullString  `gorm:"column:ModifyPersonName" json:"ModifyPersonName"`
+	ModifyWorkStation  sql.NullString  `gorm:"column:ModifyWorkStation" json:"ModifyWorkStation"`
+	OutManageRate      sql.NullFloat64 `gorm:"column:OutManageRate" json:"OutManageRate"`
+	OutManageRateDep   sql.NullString  `gorm:"column:OutManageRateDep" json:"OutManageRateDep"`
+	PYCode             sql.NullString  `gorm:"column:PYCode" json:"PYCode"`
+	PartsSalesPrice    sql.NullString  `gorm:"column:PartsSalesPrice" json:"PartsSalesPrice"`
+	PayCycleDays       sql.NullInt64   `gorm:"column:PayCycleDays" json:"PayCycleDays"`
+	Phone              sql.NullString  `gorm:"column:Phone" json:"Phone"`
+	PhoneTime          sql.NullString  `gorm:"column:PhoneTime" json:"PhoneTime"`
+	PlanVisitContent   sql.NullString  `gorm:"column:PlanVisitContent" json:"PlanVisitContent"`
+	PlanVisitDate      time.Time       `gorm:"column:PlanVisitDate" json:"PlanVisitDate"`
+	PlanVisitType      sql.NullString  `gorm:"column:PlanVisitType" json:"PlanVisitType"`
+	PostCode           sql.NullString  `gorm:"column:PostCode" json:"PostCode"`
+	Province           sql.NullString  `gorm:"column:Province" json:"Province"`
+	QQ                 sql.NullString  `gorm:"column:QQ" json:"QQ"`
+	RelaSalesCode      sql.NullString  `gorm:"column:RelaSalesCode" json:"RelaSalesCode"`
+	RelaSalesman       sql.NullString  `gorm:"column:RelaSalesman" json:"RelaSalesman"`
+	Remarks            sql.NullString  `gorm:"column:Remarks" json:"Remarks"`
+	SalesAmount        sql.NullFloat64 `gorm:"column:SalesAmount" json:"SalesAmount"`
+	SalesCount         sql.NullInt64   `gorm:"column:SalesCount" json:"SalesCount"`
+	Sex                sql.NullString  `gorm:"column:Sex" json:"Sex"`
+	ShortName          sql.NullString  `gorm:"column:ShortName" json:"ShortName"`
+	Status             sql.NullString  `gorm:"column:Status" json:"Status"`
+	SupplierType       sql.NullString  `gorm:"column:SupplierType" json:"SupplierType"`
+	TaxNumber          sql.NullString  `gorm:"column:TaxNumber" json:"TaxNumber"`
+	TmpField1          sql.NullInt64   `gorm:"column:TmpField1" json:"TmpField1"`
+	Trade              sql.NullString  `gorm:"column:Trade" json:"Trade"`
+	Transport          sql.NullString  `gorm:"column:Transport" json:"Transport"`
+	UseIntegral        int             `gorm:"column:UseIntegral" json:"UseIntegral"`
+	ValueCardNo        sql.NullString  `gorm:"column:ValueCardNo" json:"ValueCardNo"`
+	VehicleCount       sql.NullInt64   `gorm:"column:VehicleCount" json:"VehicleCount"`
+	WBCode             sql.NullString  `gorm:"column:WBCode" json:"WBCode"`
+	WorkAt             sql.NullString  `gorm:"column:WorkAt" json:"WorkAt"`
+	Cid                sql.NullInt64   `gorm:"column:cid" json:"cid"`
+	ID                 int             `gorm:"column:id;primary_key" json:"id;primary_key"`
+	LastInfo           sql.NullString  `gorm:"column:lastInfo" json:"lastInfo"`
+	Nickname           sql.NullString  `gorm:"column:nickname" json:"nickname"`
+}
+
+// TableName sets the insert table name for this struct type
+func (g *GCustomerm) TableName() string {
+	return "g_customerm"
+}
