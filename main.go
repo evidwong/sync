@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -122,43 +123,59 @@ func run(mydb *Mydb) {
 }
 
 func sendWechatTemplateMessage(mydb *Mydb) {
-	var cid string
+	var cid int
 	for {
 		r := pool.Conn.Get()
+		_, err := r.Do("Select", 10)
+		if err != nil {
+			r.Close()
+			fmt.Println(err, 1)
+			time.Sleep(time.Second * 2)
+			continue
+		}
 		key, err := redis.String(r.Do("Rpop", "wechat:message:template"))
 		if err != nil {
 			r.Close()
+			fmt.Println(err, 2)
+			time.Sleep(time.Second * 2)
 			continue
 		}
 		content, err := redis.String(r.Do("Get", key))
 		if err != nil {
 			r.Close()
+			fmt.Println(err, 3)
+			time.Sleep(time.Second * 2)
 			continue
 		}
-		var redisData map[string]string
+		var redisData WechatMessage
 		err = json.Unmarshal([]byte(content), &redisData)
 		if err != nil {
 			r.Close()
-			continue
-		}
-		if _, ok := redisData["job"]; !ok {
-			r.Close()
+			fmt.Println(err, 4)
+			time.Sleep(time.Second * 2)
 			continue
 		}
 		var msg template.Message
-		err = json.Unmarshal([]byte(redisData["job"]), &msg)
+		err = json.Unmarshal([]byte(redisData.Job), &msg)
 		if err != nil {
 			r.Close()
+			fmt.Println(err, 6)
+			time.Sleep(time.Second * 2)
 			continue
 		}
 
-		cid = redisData["cid"]
+		cid = redisData.Cid
 		_, err = r.Do("Select", 1)
 		if err != nil {
+			r.Close()
+			fmt.Println(err, 7)
+			time.Sleep(time.Second * 2)
 			continue
 		}
-		wechatConfig, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
+		wechatConfig, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+strconv.Itoa(cid)))
 		if err != nil {
+			r.Close()
+			fmt.Println(err, 8)
 			continue
 		}
 		wechat := NewWechat(&Config{
@@ -171,18 +188,26 @@ func sendWechatTemplateMessage(mydb *Mydb) {
 		_, err = tplMsg.Send(&msg)
 		if err != nil {
 			fmt.Println("发送模板消息失败")
-			fmt.Println(err)
+			fmt.Println(err, 9)
 			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err})
 		} else {
 			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
 		}
+		r.Close()
+		time.Sleep(time.Second * 2)
 	}
 }
 func sendSmsMessage(mydb *Mydb) {
 	var cid string
 	for {
 		r := pool.Conn.Get()
-
+		_, err := r.Do("Select", 1)
+		if err != nil {
+			r.Close()
+			fmt.Println(err)
+			time.Sleep(time.Second * 2)
+			continue
+		}
 		key, err := redis.String(r.Do("Rpop", "sms:message"))
 		if err != nil {
 			r.Close()
@@ -234,6 +259,9 @@ func init() {
 		Password: cfg.Redis.Auth,
 		Port:     cfg.Redis.Port,
 		Database: cfg.Redis.DB,
+		MaxActive:cfg.Redis.MaxActive,
+		MaxIdle:cfg.Redis.MaxIdle,
+		IdleTimeout:cfg.Redis.IdleTimeout,
 	})
 	mydb = NewMydb(cfg)
 }

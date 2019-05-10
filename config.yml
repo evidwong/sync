@@ -4,7 +4,7 @@ redis:
   auth:
   db: 1
   max_idle: 5
-  max_active: 0
+  max_active: 10
   idle_timeout: 0
 mysql:
   host: 127.0.0.1
