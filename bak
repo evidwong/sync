@@ -1,0 +1,40 @@
+var jobs []models.RemindJob
+		mydb.db.Where("type='wechat' AND action_at='0000-00-00 00:00:00' AND status=0").Find(&jobs)
+		if len(jobs) <= 0 {
+			time.Sleep(time.Second * 10)
+		} else {
+
+			for _, row := range jobs {
+				cid = row.Cid
+				var msg template.Message
+				err := json.Unmarshal([]byte(row.Job), &msg)
+				if err != nil {
+					continue
+				}
+				r := pool.Conn.Get()
+				_, err = r.Do("Select", 1)
+				if err != nil {
+					continue
+				}
+				wechatConfig, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+strconv.Itoa(cid)))
+				if err != nil {
+					continue
+				}
+				wechat := NewWechat(&Config{
+					AppID:     wechatConfig["appid"],
+					AppSecret: wechatConfig["appsecret"],
+					Token:     wechatConfig["token"],
+					Cache:     pool,
+				})
+				tplMsg := template.NewTemplate(wechat.Context)
+				_, err = tplMsg.Send(&msg)
+				if err != nil {
+					fmt.Println("发送模板消息失败")
+					fmt.Println(err)
+					mydb.db.Table("remind_job").Where("id=?",row.ID).Update(map[string]interface{}{"status":-1,"fail_content":err})
+				}else{
+					mydb.db.Table("remind_job").Where("id=?",row.ID).Update(map[string]interface{}{"action_at":time.Now().Format("2006-01-02 15:04:05"),"status":1})
+				}
+			}
+			time.Sleep(time.Second * 5)
+		}

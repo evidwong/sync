@@ -1,0 +1,15 @@
+redis:
+  host: 127.0.0.1
+  port: 6379
+  auth:
+  db: 1
+  max_idle: 5
+  max_active: 0
+  idle_timeout: 0
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password:
+  database: test_baisiyi
+  charset: utf8

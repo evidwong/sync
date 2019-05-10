@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"sync"
 	"time"
-
-	"baisiyi.net/models"
 
 	"github.com/silenceper/wechat/cache"
 
 	"baisiyi.net/config"
+	"baisiyi.net/util"
 
 	"github.com/gomodule/redigo/redis"
 	"github.com/jinzhu/gorm"
@@ -33,7 +31,7 @@ var (
 )
 
 const (
-	configFile = "./config.yaml"
+	configFile = "./config.yml"
 )
 
 // Mydb 数据连接
@@ -52,6 +50,21 @@ func NewMydb(cfg *config.Config) *Mydb {
 	mydb.DB().SetMaxIdleConns(10)
 	mydb.DB().SetMaxOpenConns(100)
 	return &Mydb{mydb}
+}
+
+// WechatMessageBase 微信信息基础
+type WechatMessageBase struct {
+	Value string `json:"value"`
+	Color string `json:"color"`
+}
+
+// WechatMessage redis存的微信推送信息
+type WechatMessage struct {
+	Cid   int    `json:"cid"`
+	Type  string `json:"type"`
+	Comno string `json:"comno"`
+	Phone string `json:"phone"`
+	Job   string `json:"job"`
 }
 
 //Config 微信配置
@@ -104,54 +117,109 @@ func run(mydb *Mydb) {
 	logger = log.New(logFileHandle, "", log.LstdFlags|log.Lshortfile) // 日志文件格式:log包含时间及文件行数
 	for i := 0; i < 1; i++ {
 		go sendWechatTemplateMessage(mydb)
-		// go sendSmsMessage()
+		go sendSmsMessage(mydb)
 	}
 }
 
 func sendWechatTemplateMessage(mydb *Mydb) {
-	defer mydb.db.Close()
-	var cid int
+	var cid string
 	for {
-		var jobs []models.RemindJob
-		mydb.db.Where("type='wechat' AND action_at='0000-00-00 00:00:00' AND status=0").Find(&jobs)
-		if len(jobs) <= 0 {
-			time.Sleep(time.Second * 10)
-		} else {
+		r := pool.Conn.Get()
+		key, err := redis.String(r.Do("Rpop", "wechat:message:template"))
+		if err != nil {
+			r.Close()
+			continue
+		}
+		content, err := redis.String(r.Do("Get", key))
+		if err != nil {
+			r.Close()
+			continue
+		}
+		var redisData map[string]string
+		err = json.Unmarshal([]byte(content), &redisData)
+		if err != nil {
+			r.Close()
+			continue
+		}
+		if _, ok := redisData["job"]; !ok {
+			r.Close()
+			continue
+		}
+		var msg template.Message
+		err = json.Unmarshal([]byte(redisData["job"]), &msg)
+		if err != nil {
+			r.Close()
+			continue
+		}
 
-			for _, row := range jobs {
-				cid = row.Cid
-				var msg template.Message
-				err := json.Unmarshal([]byte(row.Job), &msg)
-				if err != nil {
-					continue
-				}
-				r := pool.Conn.Get()
-				_, err = r.Do("Select", 1)
-				if err != nil {
-					continue
-				}
-				wechatConfig, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+strconv.Itoa(cid)))
-				if err != nil {
-					continue
-				}
-				wechat := NewWechat(&Config{
-					AppID:     wechatConfig["appid"],
-					AppSecret: wechatConfig["appsecret"],
-					Token:     wechatConfig["token"],
-					Cache:     pool,
-				})
-				tplMsg := template.NewTemplate(wechat.Context)
-				_, err = tplMsg.Send(&msg)
-				if err != nil {
-					fmt.Println("发送模板消息失败")
-				}
-			}
-			time.Sleep(time.Second * 5)
+		cid = redisData["cid"]
+		_, err = r.Do("Select", 1)
+		if err != nil {
+			continue
+		}
+		wechatConfig, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
+		if err != nil {
+			continue
+		}
+		wechat := NewWechat(&Config{
+			AppID:     wechatConfig["appid"],
+			AppSecret: wechatConfig["appsecret"],
+			Token:     wechatConfig["token"],
+			Cache:     pool,
+		})
+		tplMsg := template.NewTemplate(wechat.Context)
+		_, err = tplMsg.Send(&msg)
+		if err != nil {
+			fmt.Println("发送模板消息失败")
+			fmt.Println(err)
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err})
+		} else {
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
 		}
 	}
 }
-func sendSmsMessage() {
+func sendSmsMessage(mydb *Mydb) {
+	var cid string
+	for {
+		r := pool.Conn.Get()
 
+		key, err := redis.String(r.Do("Rpop", "sms:message"))
+		if err != nil {
+			r.Close()
+			continue
+		}
+		content, err := redis.String(r.Do("Get", key))
+		if err != nil {
+			r.Close()
+			continue
+		}
+		var redisData map[string]string
+		err = json.Unmarshal([]byte(content), &redisData)
+		if err != nil {
+			r.Close()
+			continue
+		}
+		if _, ok := redisData["job"]; !ok {
+			r.Close()
+			continue
+		}
+		cid = redisData["cid"]
+		cfg, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
+		if err != nil {
+			r.Close()
+			continue
+		}
+		var sms *util.Mwsms
+		sms = util.NewMwsms("http://"+cfg["sms_ip"], cfg["sms_address"], cfg["sms_port"], cfg["sms_account"], cfg["sms_passcode"], "")
+		sendResult := sms.Send(redisData["phone"], redisData["job"], "*", time.Now().UnixNano(), 1)
+		fmt.Println(sendResult)
+		if !sendResult {
+			r.Close()
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err})
+			continue
+		}
+		mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
+	}
 }
 
 func init() {
@@ -168,10 +236,9 @@ func init() {
 		Database: cfg.Redis.DB,
 	})
 	mydb = NewMydb(cfg)
-	fmt.Printf("%T", mydb)
-
 }
 func main() {
+	defer mydb.db.Close()
 	run(mydb)
 	endTime = time.Now().UnixNano()
 	fmt.Println("used time: ", (endTime-startTime)/1000/1000/1000/1000)
