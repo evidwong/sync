@@ -62,11 +62,12 @@ type WechatMessageBase struct {
 
 // WechatMessage redis存的微信推送信息
 type WechatMessage struct {
-	Cid   int    `json:"cid"`
-	Type  string `json:"type"`
-	Comno string `json:"comno"`
-	Phone string `json:"phone"`
-	Job   string `json:"job"`
+	Cid    int    `json:"cid"`
+	Type   string `json:"type"`
+	Comno  string `json:"comno"`
+	Phone  string `json:"phone"`
+	Smsnum int    `json:"smsnum"`
+	Job    string `json:"job"`
 }
 
 //Config 微信配置
@@ -79,6 +80,7 @@ type Config struct {
 	PayNotifyURL   string //支付 - 接受微信支付结果通知的接口地址
 	PayKey         string //支付 - 商户后台设置的支付 key
 	Cache          cache.Cache
+	Cid            string
 }
 
 // Wechat 微信
@@ -127,7 +129,7 @@ func run(mydb *Mydb) {
 }
 
 // GetInfo 获取redis
-func GetInfo(t string, k string) (redis.Conn, *WechatMessage, *os.File, string) {
+func GetInfo(t string, k string) (WechatMessage, *os.File, string) {
 	log.SetFormatter(&log.JSONFormatter{
 		TimestampFormat: "2006-01-02 15:04:05",
 	})
@@ -136,7 +138,7 @@ func GetInfo(t string, k string) (redis.Conn, *WechatMessage, *os.File, string) 
 	if err != nil {
 		log.Info("创建或使用日志文件失败. " + err.Error())
 		time.Sleep(time.Second * 5)
-		return nil, nil, nil, ""
+		return WechatMessage{}, nil, ""
 	}
 	log.SetOutput(logFileHandle)
 
@@ -146,53 +148,55 @@ func GetInfo(t string, k string) (redis.Conn, *WechatMessage, *os.File, string) 
 		r.Close()
 		log.Info("选择数据库 10 失败. " + err.Error())
 		time.Sleep(time.Second * 3)
-		return nil, nil, nil, ""
+		return WechatMessage{}, nil, ""
 	}
 	key, err := redis.String(r.Do("Rpop", k))
 	if err != nil {
 		r.Close()
 		log.Info("Rpop列表 失败. " + err.Error())
 		time.Sleep(time.Second * 3)
-		return nil, nil, nil, ""
+		return WechatMessage{}, nil, ""
 	}
 	content, err := redis.String(r.Do("Get", key))
 	if err != nil {
 		r.Close()
 		log.Info("获取key对应的数据 失败. " + err.Error())
-		return nil, nil, nil, ""
+		return WechatMessage{}, nil, ""
 	}
 	var redisData WechatMessage
+
+	fmt.Println(content)
 	err = json.Unmarshal([]byte(content), &redisData)
 	if err != nil {
 		r.Close()
 		log.Info("JSON解析key对应的数据 失败. " + err.Error())
 		time.Sleep(time.Second * 3)
-		return nil, nil, nil, ""
+		return WechatMessage{}, nil, ""
 	}
-	return r, &redisData, logFileHandle, key
+	r.Close()
+	return redisData, logFileHandle, key
 
 }
 func sendWechatTemplateMessage(mydb *Mydb) {
 	var cid string
 	for {
-		r, job, file, key := GetInfo("wechat", "wechat:message:template")
-		if r == nil {
-			time.Sleep(time.Second * 5)
-			continue
-		}
+		job, file, key := GetInfo("wechat", "wechat:message:template")
+		r := pool.Conn.Get()
 		_, err := r.Do("Select", 1)
 		if err != nil {
-			r.Close()
 			log.Info("切换数据库到 1 失败. " + err.Error())
+			r.Close()
 			file.Close()
 			time.Sleep(time.Second * 5)
 			continue
 		}
+		// fmt.Println(r)
+		// time.Sleep(time.Second * 5)
 		cid = strconv.Itoa(job.Cid)
 		cfg, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
 		if err != nil {
-			r.Close()
 			log.Info("[" + cid + "] 获取配置信息 失败. " + err.Error())
+			r.Close()
 			file.Close()
 			time.Sleep(time.Second * 3)
 			continue
@@ -202,12 +206,16 @@ func sendWechatTemplateMessage(mydb *Mydb) {
 			AppSecret: cfg["appsecret"],
 			Token:     cfg["token"],
 			Cache:     pool,
+			Cid:       cid,
 		})
 		var msg template.Message
 		err = json.Unmarshal([]byte(job.Job), &msg)
+		fmt.Println(job.Job)
+		log.Info(job.Job)
 		if err != nil {
-			r.Close()
 			log.Info("[" + cid + "] JSON解析微信模板消息 失败. " + err.Error())
+			log.Info(job.Job)
+			r.Close()
 			file.Close()
 			time.Sleep(time.Second * 2)
 			continue
@@ -221,18 +229,17 @@ func sendWechatTemplateMessage(mydb *Mydb) {
 			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
 		}
 		r.Close()
+		file.Close()
 		time.Sleep(time.Second * 3)
 	}
 }
 func sendSmsMessage(mydb *Mydb) {
 	var cid string
 	for {
-		r, job, file, key := GetInfo("sms", "sms:message")
-		if r == nil {
-			time.Sleep(time.Second * 5)
-			continue
-		}
+		job, file, key := GetInfo("sms", "sms:message")
+
 		cid = strconv.Itoa(job.Cid)
+		r := pool.Conn.Get()
 		cfg, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
 		if err != nil {
 			log.Info("[" + cid + "] 获取配置信息 失败. " + err.Error())
@@ -243,8 +250,8 @@ func sendSmsMessage(mydb *Mydb) {
 		}
 		_, err = r.Do("hIncrBy", "company:"+cid, "sms_lave", -1)
 		if err != nil {
-			r.Close()
 			log.Info("[" + cid + "] 获取商户信息 失败. " + err.Error())
+			r.Close()
 			file.Close()
 			time.Sleep(time.Second * 3)
 			continue
@@ -254,12 +261,9 @@ func sendSmsMessage(mydb *Mydb) {
 		sendResult := sms.Send(job.Phone, job.Job, "*", time.Now().UnixNano(), 1)
 		fmt.Println(sendResult)
 		if !sendResult {
-			r.Do("hIncrBy", "company:"+cid, "sms_lave")
+			r.Do("hIncrBy", "company:"+cid, "sms_lave", -1)
 			log.Info("[" + cid + "] 发送短信 失败. " + err.Error())
-			time.Sleep(time.Second * 5)
 			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err})
-			r.Close()
-			file.Close()
 			continue
 		} else {
 			log.Info("[" + cid + "] 发送短信 成功. ")

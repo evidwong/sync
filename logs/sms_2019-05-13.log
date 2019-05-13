@@ -1,0 +1,10 @@
+{"level":"info","msg":"Rpop列表 失败. redigo: nil returned","time":"2019-05-13 16:31:45"}
+{"level":"info","msg":"[1006] 发送短信 成功. ","time":"2019-05-13 16:31:45"}
+{"level":"info","msg":"[1006] 发送短信 成功. ","time":"2019-05-13 16:31:48"}
+{"level":"info","msg":"[1006] 发送短信 成功. ","time":"2019-05-13 16:31:51"}
+{"level":"info","msg":"[1006] 发送短信 成功. ","time":"2019-05-13 16:31:55"}
+{"level":"info","msg":"[1006] 发送短信 成功. ","time":"2019-05-13 16:31:58"}
+{"level":"info","msg":"","time":"2019-05-13 16:31:58"}
+{"level":"info","msg":"[0] JSON解析微信模板消息 失败. unexpected end of JSON input","time":"2019-05-13 16:31:58"}
+{"level":"info","msg":"[1006] 发送短信 成功. ","time":"2019-05-13 16:32:01"}
+{"level":"info","msg":"Rpop列表 失败. redigo: nil returned","time":"2019-05-13 16:32:04"}
