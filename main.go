@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"sync"
 	"time"
+	"strconv"
+	"net/http"
+	"bytes"
 
 	log "github.com/sirupsen/logrus"
 
@@ -16,6 +18,7 @@ import (
 	"baisiyi.net/util"
 
 	"github.com/gomodule/redigo/redis"
+	_ "github.com/icattlecoder/godaemon"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/silenceper/wechat/context"
@@ -23,17 +26,29 @@ import (
 )
 
 var (
-	mydb        *Mydb
-	pool        *cache.Redis
-	startTime   int64
-	endTime     int64
-	redisConStr string
-	mysqlConStr string
-	logger      *log.Logger
+	mydb          *Mydb
+	pool          *cache.Redis
+	redisConStr   string
+	mysqlConStr   string
+	logger        *log.Logger
+	wmu           sync.Mutex
+	smu           sync.Mutex
+	pushMu		  sync.Mutex
+	wechatLogChan chan string
+	smsLogChan    chan string
+	pubLogChan    chan string
+	startTime     time.Time
+	endTime       time.Time
+	domain		  string
 )
 
+// 定义常量
 const (
-	configFile = "./config.yml"
+	configFile      = "./config.yml"
+	timeFormat      = "2006-01-02 15:04:05"
+	dateFormat      = "2006-01-02"
+	wechatCacheList = "wechat:message:template"
+	smsCacheList    = "sms:message"
 )
 
 // Mydb 数据连接
@@ -46,7 +61,6 @@ func NewMydb(cfg *config.Config) *Mydb {
 	mysqlConStr = cfg.Mysql.User + ":" + cfg.Mysql.PassWord + "@tcp(" + cfg.Mysql.Host + ":" + cfg.Mysql.Port + ")/" + cfg.Mysql.DataBase + "?charset=" + cfg.Mysql.Charset + "&parseTime=True&loc=Local"
 	mydb, err := gorm.Open("mysql", mysqlConStr)
 	if err != nil {
-		fmt.Println("connect error: ", err)
 		panic("数据库连接失败")
 	}
 	mydb.DB().SetMaxIdleConns(10)
@@ -62,12 +76,13 @@ type WechatMessageBase struct {
 
 // WechatMessage redis存的微信推送信息
 type WechatMessage struct {
-	Cid    int    `json:"cid"`
-	Type   string `json:"type"`
-	Comno  string `json:"comno"`
-	Phone  string `json:"phone"`
-	Smsnum int    `json:"smsnum"`
-	Job    string `json:"job"`
+	Cid     string `json:"cid"`
+	Type    string `json:"type"`
+	Comno   string `json:"comno"`
+	Phone   string `json:"phone"`
+	Smsnum  int    `json:"smsnum"`
+	Job     string `json:"job"`
+	Jobtype string `json:"jobtype"`
 }
 
 //Config 微信配置
@@ -107,100 +122,167 @@ func copyConfigToContext(cfg *Config, context *context.Context) {
 	context.SetJsAPITicketLock(new(sync.RWMutex))
 }
 
-/**
- * run
- * 开启时查询所有的商户，并加入到时服务中
- */
-func run(mydb *Mydb) {
-	log.SetFormatter(&log.JSONFormatter{
-		TimestampFormat: "2006-01-02 15:04:05",
-	})
-	logFileName := "./logs/system.log"
-	logFileHandle, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE, 666)
-	if err != nil {
-		log.Panicln("fail to create " + logFileName + " file!")
-	}
-	log.SetOutput(logFileHandle)
-	logFileHandle.Close()
-	for i := 0; i < 1; i++ {
-		go sendWechatTemplateMessage(mydb)
-		go sendSmsMessage(mydb)
-	}
-}
-
-// GetInfo 获取redis
-func GetInfo(t string, k string) (WechatMessage, *os.File, string) {
-	log.SetFormatter(&log.JSONFormatter{
-		TimestampFormat: "2006-01-02 15:04:05",
-	})
-	filename := "./logs/" + t + "_" + time.Now().Format("2006-01-02") + ".log"
-	logFileHandle, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE, 666)
-	if err != nil {
-		log.Info("创建或使用日志文件失败. " + err.Error())
-		time.Sleep(time.Second * 5)
-		return WechatMessage{}, nil, ""
-	}
-	log.SetOutput(logFileHandle)
-
+func GetPushInfo(k string) (map[string]interface{},string){
 	r := pool.Conn.Get()
-	_, err = r.Do("Select", 10)
+	_, err := r.Do("Select", 10)
 	if err != nil {
+		pubLogChan <- "public,,选择数据库 10 失败. " + err.Error()
 		r.Close()
-		log.Info("选择数据库 10 失败. " + err.Error())
-		time.Sleep(time.Second * 3)
-		return WechatMessage{}, nil, ""
+		return nil, ""
+	}
+	key,err:=redis.String(r.Do("Rpop",k));
+	if err != nil {
+		pubLogChan <- "public,Rpop error: " + err.Error()
+		r.Close()
+		return nil, ""
+	}
+	pubLogChan <- "public,key: " + key
+	content, err := redis.String(r.Do("Get", key))
+	if err != nil {
+		if err.Error() != "redigo: nil returned" {
+			pubLogChan <- "public,获取key对应的数据,失败. " + err.Error()
+		}
+		r.Do("Lpush", k, key)
+		r.Close()
+		return nil, ""
+	}
+	var msg map[string]interface{}
+	err = json.Unmarshal([]byte(content), &msg)
+	if err != nil {
+		pubLogChan <- "public,,JSON解析key对应的数据,失败. " + err.Error()
+		r.Do("Lpush", k, key)
+		r.Close()
+		return nil, ""
+	}
+	if _,ok:=msg["companyId"];!ok{
+		r.Close()
+		return nil, ""
+	}
+	if _,ok:=msg["msgType"];!ok{
+		r.Close()
+		return nil, ""
+	}
+	r.Close()
+	return msg, key
+}
+// GetInfo 获取redis
+func GetInfo(t string, k string, i int) (WechatMessage, string) {
+	r := pool.Conn.Get()
+	_, err := r.Do("Select", 10)
+	if err != nil {
+		pubLogChan <- "public,,选择数据库 10 失败. " + err.Error()
+		r.Close()
+		return WechatMessage{}, ""
 	}
 	key, err := redis.String(r.Do("Rpop", k))
 	if err != nil {
 		r.Close()
-		log.Info("Rpop列表 失败. " + err.Error())
-		time.Sleep(time.Second * 3)
-		return WechatMessage{}, nil, ""
+		return WechatMessage{}, ""
 	}
 	content, err := redis.String(r.Do("Get", key))
 	if err != nil {
+		if err.Error() != "redigo: nil returned" {
+			pubLogChan <- "public,,获取key对应的数据,失败. " + err.Error()
+		}
+		r.Do("Lpush", k, key)
 		r.Close()
-		log.Info("获取key对应的数据 失败. " + err.Error())
-		return WechatMessage{}, nil, ""
+		return WechatMessage{}, ""
 	}
 	var redisData WechatMessage
-
-	fmt.Println(content)
 	err = json.Unmarshal([]byte(content), &redisData)
 	if err != nil {
+		pubLogChan <- "public,,JSON解析key对应的数据,失败. " + err.Error()
+		r.Do("Lpush", k, key)
 		r.Close()
-		log.Info("JSON解析key对应的数据 失败. " + err.Error())
-		time.Sleep(time.Second * 3)
-		return WechatMessage{}, nil, ""
+		return WechatMessage{}, ""
+	}
+	if redisData.Cid == "" || redisData.Cid == "0" {
+		r.Close()
+		return WechatMessage{}, ""
+	}
+	r.Do("Select", 1)
+	cronStr, err := redis.String(r.Do("Hget", "cron:config:"+redisData.Cid, redisData.Jobtype))
+	if err != nil {
+		pubLogChan <- "public,[" + redisData.Cid + "],获取商户推送配置,失败. " + err.Error()
+		r.Do("Select", 10)
+		r.Do("Lpush", k, key)
+		r.Close()
+		return WechatMessage{}, ""
+	}
+
+	var cron map[string]interface{}
+	err = json.Unmarshal([]byte(cronStr), &cron)
+	if err != nil {
+		pubLogChan <- "public,[" + redisData.Cid + "],解析商户推送配置,失败. " + err.Error()
+		r.Do("Select", 10)
+		r.Do("Lpush", k, key)
+		r.Close()
+		return WechatMessage{}, ""
+	}
+	if _, ok := cron["start_at"]; ok {
+		start, ok := (cron["start_at"]).(string)
+		if ok && start != "" && time.Now().Format("15:04") < start {
+			pubLogChan <- "public,[" + redisData.Cid + "],推送时间不符合条件,失败. 推送开始时间: " + start
+			r.Do("Select", 10)
+			r.Do("Lpush", k, key)
+			r.Close()
+			return WechatMessage{}, ""
+		}
+	}
+	if _, ok := cron["end_at"]; ok {
+		end, ok := (cron["end_at"]).(string)
+		if ok && end != "" && time.Now().Format("15:04") > end {
+			pubLogChan <- "wechat,[" + redisData.Cid + "],推送时间不符合条件,失败. 推送结束时间: " + end
+			r.Do("Select", 10)
+			r.Do("Lpush", k, key)
+			r.Close()
+			return WechatMessage{}, ""
+		}
 	}
 	r.Close()
-	return redisData, logFileHandle, key
+	return redisData, key
 
 }
-func sendWechatTemplateMessage(mydb *Mydb) {
+func sendWechatTemplateMessage(mydb *Mydb, i int) {
 	var cid string
 	for {
-		job, file, key := GetInfo("wechat", "wechat:message:template")
-		r := pool.Conn.Get()
-		_, err := r.Do("Select", 1)
-		if err != nil {
-			log.Info("切换数据库到 1 失败. " + err.Error())
-			r.Close()
-			file.Close()
+		wmu.Lock()
+		job, key := GetInfo("wechat", wechatCacheList, i)
+		if key == "" {
+			wmu.Unlock()
 			time.Sleep(time.Second * 5)
 			continue
 		}
-		// fmt.Println(r)
-		// time.Sleep(time.Second * 5)
-		cid = strconv.Itoa(job.Cid)
+		if job.Cid == "" || job.Cid == "0" || job.Job == "" {
+			wmu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		cid = job.Cid
+		r := pool.Conn.Get()
+		_, err := r.Do("Select", 1)
+		if err != nil || job.Job == "" {
+			wechatLogChan <- "wechat,[" + cid + "],切换到 1 号数据库,失败. " + err.Error()
+			r.Do("Lpush", wechatCacheList, key)
+			r.Close()
+			wmu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+
 		cfg, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
 		if err != nil {
-			log.Info("[" + cid + "] 获取配置信息 失败. " + err.Error())
+			wechatLogChan <- "wechat,[" + cid + "],获取商户配置信息,失败. " + err.Error()
+			r.Do("Select", 10)
+			r.Do("Lpush", wechatCacheList, key)
 			r.Close()
-			file.Close()
+			wmu.Unlock()
 			time.Sleep(time.Second * 3)
 			continue
 		}
+		s,_:=json.Marshal(cfg)
+		wechatLogChan <- "wechat,[" + cid + "],config,. " + string(s)
+		
 		wechat := NewWechat(&Config{
 			AppID:     cfg["appid"],
 			AppSecret: cfg["appsecret"],
@@ -208,82 +290,187 @@ func sendWechatTemplateMessage(mydb *Mydb) {
 			Cache:     pool,
 			Cid:       cid,
 		})
+		wechatLogChan <- "wechat,[" + cid + "],job,. " + job.Job
 		var msg template.Message
 		err = json.Unmarshal([]byte(job.Job), &msg)
-		fmt.Println(job.Job)
-		log.Info(job.Job)
 		if err != nil {
-			log.Info("[" + cid + "] JSON解析微信模板消息 失败. " + err.Error())
-			log.Info(job.Job)
+			wechatLogChan <- "wechat,[" + cid + "],JSON解析微信模板消息,失败. " + err.Error()
+			r.Do("Select", 10)
+			r.Do("Lpush", wechatCacheList, key)
 			r.Close()
-			file.Close()
+			wmu.Unlock()
 			time.Sleep(time.Second * 2)
 			continue
 		}
 		tplMsg := template.NewTemplate(wechat.Context)
 		_, err = tplMsg.Send(&msg)
 		if err != nil {
-			log.Info("[" + cid + "] 发送微信模板消息 失败. " + err.Error())
-			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err})
+			r.Do("Select", 10)
+			r.Do("Lpush", wechatCacheList, key)
+			wechatLogChan <- "wechat,[" + cid + "],发送微信模板消息,失败. " + err.Error()
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err.Error()})
 		} else {
-			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
+			wechatLogChan <- "wechat,[" + cid + "],发送微信模板消息,成功. "
+			r.Do("Select", 10)
+			r.Do("del", key)
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format(timeFormat), "status": 1})
 		}
 		r.Close()
-		file.Close()
+		wmu.Unlock()
 		time.Sleep(time.Second * 3)
 	}
 }
-func sendSmsMessage(mydb *Mydb) {
+func sendSmsMessage(mydb *Mydb, i int) {
 	var cid string
 	for {
-		job, file, key := GetInfo("sms", "sms:message")
+		smu.Lock()
+		// err := recover()
+		job, key := GetInfo("sms", smsCacheList, i)
+		if key == "" {
+			smu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		if job.Cid == "0" || job.Cid == "" || job.Job == "" {
+			smu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
 
-		cid = strconv.Itoa(job.Cid)
+		cid = job.Cid
 		r := pool.Conn.Get()
+		_, err := r.Do("Select", 1)
+		if err != nil || job.Job == "" {
+			smsLogChan <- "sms,[" + cid + "],切换到 1 号数据库,失败. " + err.Error()
+			r.Do("Lpush", smsCacheList, key)
+			r.Close()
+			smu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
 		cfg, err := redis.StringMap(r.Do("HgetAll", "wechat_config:"+cid))
 		if err != nil {
-			log.Info("[" + cid + "] 获取配置信息 失败. " + err.Error())
+			smsLogChan <- "sms,[" + cid + "],获取配置信息,失败. " + err.Error()
+			r.Do("Select", 10)
+			r.Do("Lpush", smsCacheList, key)
 			r.Close()
-			file.Close()
+			smu.Unlock()
 			time.Sleep(time.Second * 3)
 			continue
 		}
 		_, err = r.Do("hIncrBy", "company:"+cid, "sms_lave", -1)
 		if err != nil {
-			log.Info("[" + cid + "] 获取商户信息 失败. " + err.Error())
+			smsLogChan <- "sms,[" + cid + "],获取商户信息,失败. " + err.Error()
+			r.Do("Select", 10)
+			r.Do("Lpush", smsCacheList, key)
 			r.Close()
-			file.Close()
+			smu.Unlock()
 			time.Sleep(time.Second * 3)
 			continue
 		}
 		var sms *util.Mwsms
 		sms = util.NewMwsms("http://"+cfg["sms_ip"], cfg["sms_address"], cfg["sms_port"], cfg["sms_account"], cfg["sms_passcode"], "")
-		sendResult := sms.Send(job.Phone, job.Job, "*", time.Now().UnixNano(), 1)
-		fmt.Println(sendResult)
-		if !sendResult {
-			r.Do("hIncrBy", "company:"+cid, "sms_lave", -1)
-			log.Info("[" + cid + "] 发送短信 失败. " + err.Error())
-			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err})
-			continue
+		err = sms.Send(job.Phone, job.Job, "*", time.Now().UnixNano(), 1)
+		if err != nil {
+			r.Do("hIncrBy", "company:"+cid, "sms_lave")
+			r.Do("Select", 10)
+			r.Do("Lpush", smsCacheList, key)
+			smsLogChan <- "[" + cid + "] 发送短信 失败. " + err.Error()
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"status": -1, "fail_content": err.Error()})
 		} else {
-			log.Info("[" + cid + "] 发送短信 成功. ")
-			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
-			mydb.db.Table("r_smsrecord").Where("flag_content=?", key).Update(map[string]interface{}{"send_time": time.Now().Format("2006-01-02 15:04:05"), "status": 1})
+			smsLogChan <- "[" + cid + "] 发送短信 成功. "
+			r.Do("Select", 10)
+			r.Do("del", key)
+			mydb.db.Table("remind_job").Where("redis_key_index=?", key).Update(map[string]interface{}{"action_at": time.Now().Format(timeFormat), "status": 1})
+			mydb.db.Table("r_smsrecord").Where("flag_content=?", key).Update(map[string]interface{}{"send_time": time.Now().Format(timeFormat), "status": 1})
 			// mydb.db.Table("company").Where("id=?", cid).Update(map[string]interface{}{"sms_slave": gorm.Expr("sms_lave-?", 1)})
 		}
 		r.Close()
-		file.Close()
+		smu.Unlock()
 		time.Sleep(time.Second * 3)
+	}
+}
+func sendPushMessage(i int){
+	for{
+		pushMu.Lock()
+		var k string="Push_Message_Async:"+strconv.Itoa(i)
+		job, key := GetPushInfo(k)
+		if key == "" || job==nil {
+			pushMu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		if job["companyId"]== 0{
+			pubLogChan <- "sendPushMessage,无效的cid"
+			pushMu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		r := pool.Conn.Get()
+		var url string
+		
+		if v,ok:=(job["msgType"]).(float64);ok && v>0{
+			url=domain+"/Api/Sms/"
+		}else if v,ok:=(job["msgType"]).(float64);ok && v==0{
+			url=domain+"/Api/Api/"
+		}else{
+			r.Do("Lpush",k,key)
+			pubLogChan <- "sendPushMessage,解析URL地址失败 url: "+url
+			r.Close()
+			pushMu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		
+		if v,ok:=(job["push"]).(string);ok{
+			url=url+v
+		}
+		param,err:=json.Marshal(job)
+		if err!=nil{
+			r.Do("Lpush",k,key)
+			pubLogChan <- "sendPushMessage,json.Marshal请求参数失败"
+			r.Close()
+			pushMu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		response, err := http.Post(url, "application/json;charset=utf-8", bytes.NewBuffer([]byte(param)))
+		if err != nil {
+			pubLogChan <- "sendPushMessage,请求接口["+url+"] 参数："+string(param)+"失败"
+			r.Do("Lpush",k,key)
+			r.Close()
+			pushMu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		if response.StatusCode != http.StatusOK {
+			pubLogChan <- "sendPushMessage,请求接口["+url+"] 参数："+string(param)+"失败"
+			r.Do("Lpush",k,key)
+			r.Close()
+			pushMu.Unlock()
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		// body, _ := ioutil.ReadAll(response.Body)
+		r.Do("del",key)
+		response.Body.Close()
+		r.Close()
+		pushMu.Unlock()
+		time.Sleep(time.Second * 2)
 	}
 }
 
 func init() {
-	startTime = time.Now().UnixNano()
-	fmt.Println("init start")
+	startTime = time.Now()
 	cfg, err := config.NewConfig(configFile)
 	if err != nil {
 		panic(err)
 	}
+	domain=cfg.Web.Domain
+	wechatLogChan = make(chan string, 10000)
+	smsLogChan = make(chan string, 100000)
+	pubLogChan = make(chan string, 100000)
+
 	pool = cache.NewRedis(&cache.RedisOpts{
 		Host:        cfg.Redis.Host,
 		Password:    cfg.Redis.Auth,
@@ -295,10 +482,53 @@ func init() {
 	})
 	mydb = NewMydb(cfg)
 }
+func writeLog(filename string, logInfo string) {
+	log.SetFormatter(&log.JSONFormatter{
+		TimestampFormat: timeFormat,
+	})
+	logFileHandle, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 666)
+	if err != nil {
+		pubLogChan <- "启用用日志文件[" + filename + "]失败. " + err.Error()
+		logFileHandle.Close()
+		fmt.Println("启用用日志文件[" + filename + "]失败. " + err.Error())
+		return
+	}
+	log.SetOutput(logFileHandle)
+	log.Info(logInfo)
+	logFileHandle.Close()
+}
 func main() {
 	defer mydb.db.Close()
-	run(mydb)
-	endTime = time.Now().UnixNano()
-	fmt.Println("used time: ", (endTime-startTime)/1000/1000/1000/1000)
+	pubLogChan <- "system start"
+	go func() {
+		for {
+			var filename, logInfo string
+			select {
+			case logInfo = <-wechatLogChan:
+				filename = "./logs/wechat-log_" + time.Now().Format(dateFormat) + ".log"
+			case logInfo = <-smsLogChan:
+				filename = "./logs/sms-log_" + time.Now().Format(dateFormat) + ".log"
+			case logInfo = <-pubLogChan:
+				filename = "./logs/pub-log_" + time.Now().Format(dateFormat) + ".log"
+			default:
+				time.Sleep(time.Second * 10)
+			}
+			if filename != "" && logInfo != "" {
+				writeLog(filename, logInfo)
+				time.Sleep(time.Second * 5)
+			}
+		}
+	}()
+	for i := 0; i < 5; i++ {
+		go sendWechatTemplateMessage(mydb, i)
+		go sendSmsMessage(mydb, i)
+	}
+	for i:=0;i<8;i++{
+		// go sendPushMessage(i);
+	}
+
+	endTime = time.Now()
+	var dur = endTime.Sub(startTime)
+	fmt.Println("used time: ", dur.String())
 	select {}
 }

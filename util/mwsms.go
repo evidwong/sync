@@ -1,7 +1,7 @@
 package util
 
 import (
-	"fmt"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"strconv"
@@ -48,7 +48,7 @@ func NewMwsms(ip string, addr string, port string, username string, password str
 }
 
 // Send 发送短信
-func (sms *Mwsms) Send(phone string, content string, pszSubPort string, msgID int64, iMobiCount int) bool {
+func (sms *Mwsms) Send(phone string, content string, pszSubPort string, msgID int64, iMobiCount int) error {
 	// msg := Msg{
 	// 	UserID:     sms.ServerUserName,
 	// 	Password:   sms.ServerPasscode,
@@ -70,34 +70,33 @@ func (sms *Mwsms) Send(phone string, content string, pszSubPort string, msgID in
 	// fmt.Println(param)
 	response, err := http.Post(sms.ServerIP+":"+sms.ServerPort+sms.ServerAddr, "application/x-www-form-urlencoded", param)
 	if err != nil {
-		return false
+		return errors.New("请求接口失败: [" + sms.ServerIP + ":" + sms.ServerPort + sms.ServerAddr + "] " + err.Error())
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return false
+		return errors.New("请求接口失败: [" + sms.ServerIP + ":" + sms.ServerPort + sms.ServerAddr + "] " + strconv.Itoa(response.StatusCode))
 	}
 	returnData, err := ioutil.ReadAll(response.Body)
-	fmt.Println(string(returnData))
 	if err != nil {
-		return false
+		return err
 	}
 	doc := etree.NewDocument()
 	err = doc.ReadFromBytes(returnData)
 	if err != nil {
-		return false
+		return errors.New("解析接口返回数据失败: " + err.Error())
 	}
 	element := doc.SelectElement("string")
 	if element == nil {
-		return false
+		return errors.New("解析接口返回数据失败 SelectElement error")
 	}
 	code, err := strconv.Atoi(element.Text())
 	if err != nil {
-		return false
+		return errors.New("解析接口返回数据失败: " + err.Error())
 	}
 	if inArray(code, errCode) {
-		return false
+		return errors.New(strconv.Itoa(code))
 	}
-	return true
+	return nil
 }
 
 // in_array 判断是否在错误码数组中

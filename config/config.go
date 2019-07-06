@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Redis *Redis
 	Mysql *Mysql
+	Web   *Web
 }
 
 // Redis 配置
@@ -31,6 +32,10 @@ type Mysql struct {
 	PassWord string `yml:"password" json:"password"`
 	DataBase string `yml:"database" json:"database"`
 	Charset  string `yml:"charset" json:"charset"`
+}
+
+type Web struct{
+	Domain string `yml:"host" json:"domain"`
 }
 
 // NewConfig 获取配置项
