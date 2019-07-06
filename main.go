@@ -36,7 +36,8 @@ var (
 	pushMu		  sync.Mutex
 	wechatLogChan chan string
 	smsLogChan    chan string
-	pubLogChan    chan string
+	sysLogChan    chan string
+	pushLogChan	  chan string
 	startTime     time.Time
 	endTime       time.Time
 	domain		  string
@@ -126,21 +127,21 @@ func GetPushInfo(k string) (map[string]interface{},string){
 	r := pool.Conn.Get()
 	_, err := r.Do("Select", 10)
 	if err != nil {
-		pubLogChan <- "public,,选择数据库 10 失败. " + err.Error()
+		sysLogChan <- "public,,选择数据库 10 失败. " + err.Error()
 		r.Close()
 		return nil, ""
 	}
 	key,err:=redis.String(r.Do("Rpop",k));
 	if err != nil {
-		pubLogChan <- "public,Rpop error: " + err.Error()
+		sysLogChan <- "public,Rpop error: " + err.Error()
 		r.Close()
 		return nil, ""
 	}
-	pubLogChan <- "public,key: " + key
+	sysLogChan <- "public,key: " + key
 	content, err := redis.String(r.Do("Get", key))
 	if err != nil {
 		if err.Error() != "redigo: nil returned" {
-			pubLogChan <- "public,获取key对应的数据,失败. " + err.Error()
+			sysLogChan <- "public,获取key对应的数据,失败. " + err.Error()
 		}
 		r.Do("Lpush", k, key)
 		r.Close()
@@ -149,7 +150,7 @@ func GetPushInfo(k string) (map[string]interface{},string){
 	var msg map[string]interface{}
 	err = json.Unmarshal([]byte(content), &msg)
 	if err != nil {
-		pubLogChan <- "public,,JSON解析key对应的数据,失败. " + err.Error()
+		sysLogChan <- "public,,JSON解析key对应的数据,失败. " + err.Error()
 		r.Do("Lpush", k, key)
 		r.Close()
 		return nil, ""
@@ -170,7 +171,7 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	r := pool.Conn.Get()
 	_, err := r.Do("Select", 10)
 	if err != nil {
-		pubLogChan <- "public,,选择数据库 10 失败. " + err.Error()
+		sysLogChan <- "public,,选择数据库 10 失败. " + err.Error()
 		r.Close()
 		return WechatMessage{}, ""
 	}
@@ -182,7 +183,7 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	content, err := redis.String(r.Do("Get", key))
 	if err != nil {
 		if err.Error() != "redigo: nil returned" {
-			pubLogChan <- "public,,获取key对应的数据,失败. " + err.Error()
+			sysLogChan <- "public,,获取key对应的数据,失败. " + err.Error()
 		}
 		r.Do("Lpush", k, key)
 		r.Close()
@@ -191,7 +192,7 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	var redisData WechatMessage
 	err = json.Unmarshal([]byte(content), &redisData)
 	if err != nil {
-		pubLogChan <- "public,,JSON解析key对应的数据,失败. " + err.Error()
+		sysLogChan <- "public,,JSON解析key对应的数据,失败. " + err.Error()
 		r.Do("Lpush", k, key)
 		r.Close()
 		return WechatMessage{}, ""
@@ -203,7 +204,7 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	r.Do("Select", 1)
 	cronStr, err := redis.String(r.Do("Hget", "cron:config:"+redisData.Cid, redisData.Jobtype))
 	if err != nil {
-		pubLogChan <- "public,[" + redisData.Cid + "],获取商户推送配置,失败. " + err.Error()
+		sysLogChan <- "public,[" + redisData.Cid + "],获取商户推送配置,失败. " + err.Error()
 		r.Do("Select", 10)
 		r.Do("Lpush", k, key)
 		r.Close()
@@ -213,7 +214,7 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	var cron map[string]interface{}
 	err = json.Unmarshal([]byte(cronStr), &cron)
 	if err != nil {
-		pubLogChan <- "public,[" + redisData.Cid + "],解析商户推送配置,失败. " + err.Error()
+		sysLogChan <- "public,[" + redisData.Cid + "],解析商户推送配置,失败. " + err.Error()
 		r.Do("Select", 10)
 		r.Do("Lpush", k, key)
 		r.Close()
@@ -221,8 +222,8 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	}
 	if _, ok := cron["start_at"]; ok {
 		start, ok := (cron["start_at"]).(string)
-		if ok && start != "" && time.Now().Format("15:04") < start {
-			pubLogChan <- "public,[" + redisData.Cid + "],推送时间不符合条件,失败. 推送开始时间: " + start
+		if ok && start != "" && time.Now().Format("15:04:05") < start {
+			sysLogChan <- "public,[" + redisData.Cid + "],推送时间不符合条件,失败. 推送开始时间: " + start
 			r.Do("Select", 10)
 			r.Do("Lpush", k, key)
 			r.Close()
@@ -231,8 +232,8 @@ func GetInfo(t string, k string, i int) (WechatMessage, string) {
 	}
 	if _, ok := cron["end_at"]; ok {
 		end, ok := (cron["end_at"]).(string)
-		if ok && end != "" && time.Now().Format("15:04") > end {
-			pubLogChan <- "wechat,[" + redisData.Cid + "],推送时间不符合条件,失败. 推送结束时间: " + end
+		if ok && end != "" && time.Now().Format("15:04:05") > end {
+			sysLogChan <- "wechat,[" + redisData.Cid + "],推送时间不符合条件,失败. 推送结束时间: " + end
 			r.Do("Select", 10)
 			r.Do("Lpush", k, key)
 			r.Close()
@@ -401,7 +402,7 @@ func sendPushMessage(i int){
 			continue
 		}
 		if job["companyId"]== 0{
-			pubLogChan <- "sendPushMessage,无效的cid"
+			pushLogChan <- "无效的cid"
 			pushMu.Unlock()
 			time.Sleep(time.Second * 5)
 			continue
@@ -415,7 +416,7 @@ func sendPushMessage(i int){
 			url=domain+"/Api/Api/"
 		}else{
 			r.Do("Lpush",k,key)
-			pubLogChan <- "sendPushMessage,解析URL地址失败 url: "+url
+			pushLogChan <- "解析URL地址失败 url: "+url
 			r.Close()
 			pushMu.Unlock()
 			time.Sleep(time.Second * 5)
@@ -428,7 +429,7 @@ func sendPushMessage(i int){
 		param,err:=json.Marshal(job)
 		if err!=nil{
 			r.Do("Lpush",k,key)
-			pubLogChan <- "sendPushMessage,json.Marshal请求参数失败"
+			pushLogChan <- "json.Marshal请求参数失败"
 			r.Close()
 			pushMu.Unlock()
 			time.Sleep(time.Second * 5)
@@ -436,7 +437,7 @@ func sendPushMessage(i int){
 		}
 		response, err := http.Post(url, "application/json;charset=utf-8", bytes.NewBuffer([]byte(param)))
 		if err != nil {
-			pubLogChan <- "sendPushMessage,请求接口["+url+"] 参数："+string(param)+"失败"
+			pushLogChan <- "请求接口["+url+"] 参数："+string(param)+"失败"
 			r.Do("Lpush",k,key)
 			r.Close()
 			pushMu.Unlock()
@@ -444,7 +445,7 @@ func sendPushMessage(i int){
 			continue
 		}
 		if response.StatusCode != http.StatusOK {
-			pubLogChan <- "sendPushMessage,请求接口["+url+"] 参数："+string(param)+"失败"
+			pushLogChan <- "请求接口["+url+"] 参数："+string(param)+"失败"
 			r.Do("Lpush",k,key)
 			r.Close()
 			pushMu.Unlock()
@@ -469,7 +470,8 @@ func init() {
 	domain=cfg.Web.Domain
 	wechatLogChan = make(chan string, 10000)
 	smsLogChan = make(chan string, 100000)
-	pubLogChan = make(chan string, 100000)
+	sysLogChan = make(chan string, 100000)
+	pushLogChan = make(chan string, 100000)
 
 	pool = cache.NewRedis(&cache.RedisOpts{
 		Host:        cfg.Redis.Host,
@@ -488,7 +490,7 @@ func writeLog(filename string, logInfo string) {
 	})
 	logFileHandle, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 666)
 	if err != nil {
-		pubLogChan <- "启用用日志文件[" + filename + "]失败. " + err.Error()
+		sysLogChan <- "启用用日志文件[" + filename + "]失败. " + err.Error()
 		logFileHandle.Close()
 		fmt.Println("启用用日志文件[" + filename + "]失败. " + err.Error())
 		return
@@ -499,7 +501,7 @@ func writeLog(filename string, logInfo string) {
 }
 func main() {
 	defer mydb.db.Close()
-	pubLogChan <- "system start"
+	sysLogChan <- "system start"
 	go func() {
 		for {
 			var filename, logInfo string
@@ -508,8 +510,10 @@ func main() {
 				filename = "./logs/wechat-log_" + time.Now().Format(dateFormat) + ".log"
 			case logInfo = <-smsLogChan:
 				filename = "./logs/sms-log_" + time.Now().Format(dateFormat) + ".log"
-			case logInfo = <-pubLogChan:
-				filename = "./logs/pub-log_" + time.Now().Format(dateFormat) + ".log"
+			case logInfo = <-sysLogChan:
+				filename = "./logs/sys-log_" + time.Now().Format(dateFormat) + ".log"
+			case logInfo = <-pushLogChan:
+				filename = "./logs/push-log_" + time.Now().Format(dateFormat) + ".log"
 			default:
 				time.Sleep(time.Second * 10)
 			}
@@ -523,6 +527,7 @@ func main() {
 		go sendWechatTemplateMessage(mydb, i)
 		go sendSmsMessage(mydb, i)
 	}
+
 	for i:=0;i<8;i++{
 		// go sendPushMessage(i);
 	}
